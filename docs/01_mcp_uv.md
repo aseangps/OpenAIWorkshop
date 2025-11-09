@@ -42,14 +42,20 @@ In this part, you will set up the MCP (Model Control Protocol) for the Microsoft
 > **Action Items:**
 > Follow the steps below to create the backend service by coding the `mcp_service.py` file. This will help you understand how to set up and run the MCP server.
 
-#### Step 1: Import FastMCP
+Note: If you are currently in the `agentic_ai/applications` folder, go back to the root folder first:
+
+```bash
+cd ../..
+```
+
+3a: Import FastMCP
 
 Add the following import statement at the top of your `mcp_service.py` file:
 ```python
 from fastmcp import FastMCP
 ```
 
-#### Step 2: Declare MCP
+3b: Declare MCP
 
 Declare the MCP instance in your `mcp_service.py` file as shown below, find the keyword "insert FastMCP initialization code here" and replace it with the following code:
 
@@ -65,7 +71,7 @@ mcp = FastMCP(
 )
 ```
 
-#### Step 3: Write MCP Tools
+3c: Write MCP Tools
 
 Add the following MCP tools to your `mcp_service.py` file. These tools define the endpoints for interacting with customer data, go to line 421:
 
@@ -101,7 +107,7 @@ async def get_subscription_detail(
     return SubscriptionDetail(**{**data, 'invoices': invoices, 'service_incidents': service_incidents})
 ```
 
-#### Step 4: Run MCP Server
+3d: Run MCP Server
 
 Finally, add the following code to the bottom of your `mcp_service.py` file to start the MCP server:
 
@@ -123,11 +129,27 @@ if __name__ == "__main__":
     uv run python mcp_service.py
     ```
     > Note: Let the MCP server run in this terminal window. Open a new terminal window to proceed to the next step. 
+    
+    <img src="media/01_mcp_fastmcp.jpg" />
 
 ## Success criteria
+
 - MCP server is running and ready to accept requests.
-- A sample curl command for ensuring the MCP server is online: 
-`curl -sS -i -X POST "http://localhost:8000/mcp" -H "Accept: application/json, text/event-stream" -H 'Content-Type: application/json'  --data '{"jsonrpc":"2.0","id":"init-1","method":"initialize", "params":{"protocolVersion":"2024-11-05","capabilities":{}, "clientInfo":{"name":"curl","version":"8"}}}'`
+- A sample powershell command for checking the MCP server status:  
+    ```powershell
+    Invoke-WebRequest -Uri "http://localhost:8000/mcp" -Method POST -Headers @{Accept="application/json, text/event-stream";"Content-Type"="application/json"} -Body               '{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"8"}}}'
+    ```
+
+    <img src="media/01_mcp_local_ok.jpg" />
+    
+    **Note:** This is an MCP server endpoint and cannot be accessed directly via a browser or unsupported transports like SSE. Please use a streamable HTTP transport. This error is expected on your browser.
+  
+    <img src="media/01_mcp_localhost_err.png" />
+
+ - A sample curl command for ensuring the MCP server is online:
+    ```bash
+    curl -sS -i -X POST "http://localhost:8000/mcp" -H "Accept: application/json, text/event-stream" -H 'Content-Type: application/json'  --data '{"jsonrpc":"2.0","id":"init-            1","method":"initialize", "params":{"protocolVersion":"2024-11-05","capabilities":{}, "clientInfo":{"name":"curl","version":"8"}}}'`
+    ```
 
 **Alternative**: Use `pip` and `venv` (slower): [Run MCP with pip](01_mcp_pip.md)
 
