@@ -63,16 +63,17 @@ def verify_token(authorization: str | None = Header(None, alias="Authorization")
 # ------------------------------------------------------------------  
 # Bring project root onto the path & load your agent dynamically  
 # ------------------------------------------------------------------  
-## coding task
-## load agent
-
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  
+agent_module_path = os.getenv("AGENT_MODULE")  
+agent_module = __import__(agent_module_path, fromlist=["Agent"])  # type: ignore[arg-type]  
+Agent = getattr(agent_module, "Agent")  
   
 # ------------------------------------------------------------------  
 # Get the correct state-store implementation  
 # ------------------------------------------------------------------  
-
-## coding task
-## state store setup
+from utils import get_state_store  
+  
+STATE_STORE = get_state_store()  # either dict or CosmosDBStateStore  
   
 # ------------------------------------------------------------------  
 # FastAPI app  
@@ -166,8 +167,74 @@ async def get_conversation_history(session_id: str, token: str = Depends(verify_
 #   - Wraps agent.run_stream
 #   - Streams tokens, messages, tool calls, and side-channel progress
 # ──────────────────────────────────────────────────────────────
-## coding task
-## websocket endpoint for streaming
+@app.websocket("/ws/chat")
+async def ws_chat(ws: WebSocket):
+    await ws.accept()
+    connected_session: Optional[str] = None
+    try:
+        while True:
+            data = await ws.receive_json()
+            session_id = data.get("session_id")
+            prompt = data.get("prompt")
+            token = data.get("access_token")  # optional
+
+            if not session_id:
+                await ws.send_json({"type": "error", "message": "Missing session_id"})
+                continue
+            if connected_session is None:
+                await MANAGER.connect(session_id, ws)
+                connected_session = session_id
+                await ws.send_json({"type": "info", "message": f"Registered session {session_id}"})
+
+            # If only registering (no prompt) continue
+            if not prompt:
+                continue
+
+            # Create agent for this session
+            try:
+                agent = Agent(STATE_STORE, session_id, access_token=token)
+            except TypeError:
+                agent = Agent(STATE_STORE, session_id)
+
+            # Inject WebSocket manager for Magentic streaming
+            if hasattr(agent, "set_websocket_manager"):
+                agent.set_websocket_manager(MANAGER)
+
+            # Set progress sink if supported (for some agent types)
+            if hasattr(agent, "set_progress_sink"):
+                async def progress_sink(ev: dict):
+                    # Broadcast progress events
+                    await MANAGER.broadcast(session_id, ev)
+                agent.set_progress_sink(progress_sink)
+
+            # Stream events from agent
+            try:
+                # Check if agent supports streaming (Autogen or Agent Framework)
+                if hasattr(agent, "chat_stream"):
+                    # Autogen streaming
+                    async for event in agent.chat_stream(prompt):
+                        evt = await serialize_autogen_event(event)
+                        if evt and evt.get("type") in ("token", "message", "final"):
+                            await MANAGER.broadcast(session_id, evt)
+                elif hasattr(agent, "chat_async"):
+                    # Agent Framework - may or may not use streaming callback
+                    result = await agent.chat_async(prompt)
+                    # If agent has _ws_manager attribute, it supports streaming and events sent via callback
+                    # Otherwise, broadcast final result here
+                    if not hasattr(agent, "_ws_manager"):
+                        await MANAGER.broadcast(session_id, {"type": "final_result", "content": result})
+                    # Else: events including final result are sent via streaming callback
+                else:
+                    await MANAGER.broadcast(session_id, {"type": "error", "message": "Agent does not support streaming"})
+
+                await MANAGER.broadcast(session_id, {"type": "done"})
+            except Exception as e:
+                await MANAGER.broadcast(session_id, {"type": "error", "message": str(e)})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if connected_session:
+            MANAGER.disconnect(connected_session, ws)
 
 
 # Helper: serialize Autogen streaming events to JSON
