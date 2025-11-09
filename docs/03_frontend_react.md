@@ -74,6 +74,10 @@ The React frontend connects to `http://localhost:7000` by default.
 
     <img src="media/03_frontend_react_chat.png" />
 
+- Chat with the agent and observe real-time token streaming and internal agent actions (e.g., tool calls, planning steps)
+  
+    <img src="media/03_frontend_magentic_steps.png" />
+
 ## Troubleshooting
 - **Port 3000 already in use?** The React app will prompt you to use a different port. Type `Y` to accept.
 - **npm install fails?** Try clearing npm cache: `npm cache clean --force` and retry.

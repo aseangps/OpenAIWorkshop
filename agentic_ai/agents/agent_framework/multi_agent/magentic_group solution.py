@@ -6,9 +6,20 @@ import os
 from threading import Lock as ThreadLock
 from typing import Any, Callable, Dict, Iterable, List, Optional, cast
 
-## coding task
-## import magentic agent
-
+from agent_framework import (
+    ChatAgent,
+    MagenticBuilder,
+    MCPStreamableHTTPTool,
+    WorkflowCheckpoint,
+    WorkflowOutputEvent,
+    CheckpointStorage,
+    MagenticCallbackEvent,
+    MagenticCallbackMode,
+    MagenticOrchestratorMessageEvent,
+    MagenticAgentDeltaEvent,
+    MagenticAgentMessageEvent,
+    MagenticFinalResultEvent,
+)
 from agent_framework.azure import AzureOpenAIChatClient  # type: ignore[import]
 
 from agents.base_agent import BaseAgent
@@ -401,9 +412,57 @@ DO NOT OUTPUT ANYTHING OTHER THAN JSON, AND DO NOT DEVIATE FROM THIS SCHEMA:
         await self._reset_checkpoint_progress(checkpoint_storage)
         return cleaned_answer
 
-    ## coding task
-    ## declare magentic builder and build workflow
-    
+    async def _build_workflow(
+        self,
+        participant_client: AzureOpenAIChatClient,
+        manager_client: AzureOpenAIChatClient,
+        tools: List[MCPStreamableHTTPTool] | None,
+        checkpoint_storage: CheckpointStorage,
+    ) -> Any:
+        participants = await self._create_participants(participant_client, tools)
+
+        builder = MagenticBuilder().participants(**participants)
+        
+        # Register streaming callback if WebSocket is available (MUST be before with_standard_manager)
+        if self._ws_manager:
+            logger.info(f"[STREAMING] Registering streaming callback for magentic events, session_id={self.session_id}")
+            logger.info(f"[STREAMING] WebSocket manager type: {type(self._ws_manager)}")
+            logger.info(f"[STREAMING] Callback function: {self._stream_magentic_event}")
+            builder = builder.on_event(self._stream_magentic_event, mode=MagenticCallbackMode.STREAMING)
+            logger.info("[STREAMING] Callback registered successfully")
+        elif self._workflow_event_logging_enabled:
+            logger.info("[STREAMING] Using workflow event logging instead of streaming")
+            builder = builder.on_event(self._log_workflow_event)
+        
+        builder = (
+            builder
+            .with_standard_manager(
+                chat_client=manager_client,
+                instructions=self._manager_instructions,
+                max_round_count=self._max_round_count,
+                max_stall_count=self._max_stall_count,
+                max_reset_count=self._max_reset_count,
+                progress_ledger_prompt=self.CUSTOM_PROGRESS_LEDGER_PROMPT,
+            )
+            .with_checkpointing(checkpoint_storage)
+        )
+
+        # Optional: enable plan review if available
+        if self._enable_plan_review:
+            enable_plan_review = getattr(builder, "enable_plan_review", None)
+            if callable(enable_plan_review):
+                try:
+                    builder = enable_plan_review()
+                except Exception as exc:
+                    logger.warning(
+                        "[AgentFramework-Magentic] Failed to enable plan review: %s", exc
+                    )
+            else:
+                logger.debug(
+                    "[AgentFramework-Magentic] Plan review requested but not available in this framework version."
+                )
+
+        return builder.build()
 
     async def _create_participants(
         self,
